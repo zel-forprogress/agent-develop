@@ -4,6 +4,8 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.messages import SystemMessage, HumanMessage
 import re
 import os
+import ast
+import operator
 
 load_dotenv()
 
@@ -14,8 +16,52 @@ llm = ChatOpenAI(
     temperature=0,
     max_tokens=1500,
 )
-
+# 搜索工具
 search_tool = DuckDuckGoSearchRun()
+
+# 安全计算器：支持 + - * / % ** 和括号
+_ALLOWED_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+def safe_calculate(expression: str) -> str:
+    def _eval(node):
+        if isinstance(node, ast.Constant):  # Python 3.8+
+            if isinstance(node.value, (int, float)):
+                return node.value
+            raise ValueError("只允许数字常量")
+        elif isinstance(node, ast.Num):  # 兼容旧版本
+            return node.n
+        elif isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in _ALLOWED_OPERATORS:
+                raise ValueError(f"不支持的运算符: {op_type.__name__}")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            return _ALLOWED_OPERATORS[op_type](left, right)
+        elif isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in _ALLOWED_OPERATORS:
+                raise ValueError(f"不支持的单目运算符: {op_type.__name__}")
+            operand = _eval(node.operand)
+            return _ALLOWED_OPERATORS[op_type](operand)
+        else:
+            raise ValueError(f"不支持的表达式类型: {type(node).__name__}")
+
+    try:
+        expression = expression.strip()
+        tree = ast.parse(expression, mode="eval")
+        result = _eval(tree.body)
+        return str(result)
+    except Exception as e:
+        return f"计算失败: {e}"
 
 REACT_SYSTEM_PROMPT = """
 你是一个精确、可靠的 ReAct 助手。
@@ -24,21 +70,34 @@ REACT_SYSTEM_PROMPT = """
 
 格式 A：
 Thought: <你对下一步的思考>
-Action: search
-Action Input: <搜索关键词>
+Action: search 或 calculator
+Action Input: <工具输入>
 
 格式 B：
 Thought: <你对当前结论的思考>
 Final Answer: <最终答案>
+
+工具说明：
+1. search
+   - 用于查询外部信息
+   - Action Input 应该是简洁的搜索关键词
+2. calculator
+   - 用于数学计算
+   - Action Input 必须是纯数学表达式，例如：
+     3 + 5
+     (18 + 5) * 2
+     25 / 4
 
 规则：
 1. 绝对不允许输出 Observation
 2. Observation 只能由程序在工具执行后提供
 3. 一轮最多只能有一个 Action
 4. 不能同时出现 Action 和 Final Answer
-5. 如果需要外部信息，使用 search
-6. 如果信息已经足够，直接给 Final Answer
-7. Action Input 要简洁，尽量精确
+5. 需要外部事实时，优先用 search
+6. 需要数学运算时，必须用 calculator
+7. 如果信息已经足够，直接给 Final Answer
+8. Action Input 要简洁，不要加多余解释
+9. calculator 的输入必须是可直接计算的表达式，不能写自然语言
 """
 
 # 构建用户提示，包含问题和之前的思考过程
@@ -119,7 +178,7 @@ def validate_output(response_text: str, allowed_actions: set):
 def run_react_agent(question: str, max_steps: int = 5):
     print(f"问题: {question}\n")
     scratchpad = ""
-    allowed_actions = {"search"}
+    allowed_actions = {"search", "calculator"}
 
     for step in range(1, max_steps + 1):
         user_prompt = build_user_prompt(question, scratchpad)
@@ -171,6 +230,10 @@ def run_react_agent(question: str, max_steps: int = 5):
                 observation = search_tool.run(action_input)
                 if not observation or not observation.strip():
                     observation = "搜索结果为空，请尝试更精确的关键词。"
+
+            elif action == "calculator":
+                observation = safe_calculate(action_input)
+
             else:
                 observation = f"未知工具: {action}"
         except Exception as e:
@@ -185,5 +248,5 @@ def run_react_agent(question: str, max_steps: int = 5):
     return None
 
 if __name__ == "__main__":
-    test_question = "Python 是哪一年发布的"
+    test_question = "Python 是哪一年发布的？然后用这个年份减去 10"
     run_react_agent(test_question)
