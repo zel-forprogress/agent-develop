@@ -33,12 +33,10 @@ _ALLOWED_OPERATORS = {
 
 def safe_calculate(expression: str) -> str:
     def _eval(node):
-        if isinstance(node, ast.Constant):  # Python 3.8+
+        if isinstance(node, ast.Constant):  # Python 3.8+ 统一使用 Constant
             if isinstance(node.value, (int, float)):
                 return node.value
             raise ValueError("只允许数字常量")
-        elif isinstance(node, ast.Num):  # 兼容旧版本
-            return node.n
         elif isinstance(node, ast.BinOp):
             op_type = type(node.op)
             if op_type not in _ALLOWED_OPERATORS:
