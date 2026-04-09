@@ -10,6 +10,10 @@ from crewai.tools import tool # 导入 tool 装饰器
 
 load_dotenv()
 
+# 修复 CrewAI 在 Windows/某些环境下无法初始化数据库的问题
+# 强制将其存储目录设置为当前项目的子目录，避免访问 C:\Users\... 权限受限
+os.environ["CREWAI_STORAGE_DIR"] = os.path.join(os.getcwd(), ".crewai")
+
 # 配置 DeepSeek LLM
 deepseek_llm = LLM(
     model="deepseek/deepseek-chat",
@@ -70,7 +74,7 @@ def build_research_crew(topic: str):
         ),
         expected_output="一份完整的 Markdown 报告，适合直接保存为 report.md",
         agent=writer,
-        output_file="output/report.md",
+        # output_file="output/report.md",
     )
 
     crew = Crew(
@@ -78,6 +82,7 @@ def build_research_crew(topic: str):
         tasks=[research_task, writing_task],
         process=Process.sequential,
         verbose=True,
+        memory=False, # 尝试关闭 memory 存储
     )
 
     return crew

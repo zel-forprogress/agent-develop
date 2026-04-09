@@ -3,3 +3,9 @@ __pycache__/
 .env
 *.pyc
 .idea/
+
+# CrewAI 缓存和数据库
+.crewai/
+
+# 任务输出目录（可选，如果你不想上传生成的报告）
+output/
